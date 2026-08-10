@@ -10,6 +10,8 @@ import (
 // Result describes the outcome of a single rate limit check.
 type Result struct {
 	Allowed bool
+	// The remaining amount of tokens in the bucket after this request, if Allowed is true.
+	Remaining int
 	// How long the caller should wait before trying again.
 	// Only meaningful when Allowed is false.
 	RetryAfter time.Duration

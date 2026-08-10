@@ -51,10 +51,10 @@ func (l *TokenBucketLimiter) Allow(ctx context.Context, key string) (Result, err
 
 	if b.tokens >= 1 {
 		b.tokens--
-		return Result{Allowed: true}, nil
+		return Result{Allowed: true, Remaining: int(b.tokens)}, nil
 	}
 
 	deficit := 1 - b.tokens
 	wait := time.Duration(deficit / l.rate * float64(time.Second))
-	return Result{Allowed: false, RetryAfter: wait}, nil
+	return Result{Allowed: false, Remaining: int(b.tokens), RetryAfter: wait}, nil
 }
