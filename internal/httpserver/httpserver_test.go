@@ -5,17 +5,27 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"rate-limiter/internal/config"
 	"rate-limiter/internal/limiter"
 	"testing"
 	"time"
 )
+
+type fakeResolver struct {
+	rule config.Rule
+	ok   bool
+}
+
+func (f fakeResolver) Resolve(tenant, path string) (config.Rule, bool) {
+	return f.rule, f.ok
+}
 
 type fakeLimiter struct {
 	result limiter.Result
 	err    error
 }
 
-func (f fakeLimiter) Allow(ctx context.Context, key string) (limiter.Result, error) {
+func (f fakeLimiter) Allow(ctx context.Context, key string, rate, burst float64) (limiter.Result, error) {
 	return f.result, f.err
 }
 
@@ -66,7 +76,10 @@ func TestAuthorize(t *testing.T) {
 		name           string
 		originalPath   string
 		forwardedFor   string
-		rules          map[string]limiter.Limiter
+		resolverRule   config.Rule
+		resolverOK     bool
+		limiterResult  limiter.Result
+		limiterErr     error
 		wantStatus     int
 		wantRemaining  string // "" means don't check
 		wantRetryAfter string // "" means don't check
@@ -74,41 +87,37 @@ func TestAuthorize(t *testing.T) {
 		{
 			name:         "missing X-Original-Path",
 			forwardedFor: "1.2.3.4",
-			rules:        map[string]limiter.Limiter{},
 			wantStatus:   http.StatusBadRequest,
 		},
 		{
 			name:         "no rule for path",
 			originalPath: "/api/unknown",
 			forwardedFor: "1.2.3.4",
-			rules:        map[string]limiter.Limiter{},
+			resolverOK:   false,
 			wantStatus:   http.StatusForbidden,
 		},
 		{
 			name:         "missing X-Forwarded-For",
 			originalPath: "/api/orders",
-			rules: map[string]limiter.Limiter{
-				"/api/orders": fakeLimiter{},
-			},
-			wantStatus: http.StatusBadRequest,
+			wantStatus:   http.StatusBadRequest,
 		},
 		{
-			name:         "allowed",
-			originalPath: "/api/orders",
-			forwardedFor: "1.2.3.4",
-			rules: map[string]limiter.Limiter{
-				"/api/orders": fakeLimiter{result: limiter.Result{Allowed: true, Remaining: 5}},
-			},
+			name:          "allowed",
+			originalPath:  "/api/orders",
+			forwardedFor:  "1.2.3.4",
+			resolverRule:  config.Rule{RequestsPerSec: 5, Burst: 10},
+			resolverOK:    true,
+			limiterResult: limiter.Result{Allowed: true, Remaining: 5},
 			wantStatus:    http.StatusOK,
 			wantRemaining: "5",
 		},
 		{
-			name:         "denied",
-			originalPath: "/api/orders",
-			forwardedFor: "1.2.3.4",
-			rules: map[string]limiter.Limiter{
-				"/api/orders": fakeLimiter{result: limiter.Result{Allowed: false, Remaining: 0, RetryAfter: 3 * time.Second}},
-			},
+			name:           "denied",
+			originalPath:   "/api/orders",
+			forwardedFor:   "1.2.3.4",
+			resolverRule:   config.Rule{RequestsPerSec: 5, Burst: 10},
+			resolverOK:     true,
+			limiterResult:  limiter.Result{Allowed: false, Remaining: 0, RetryAfter: 3 * time.Second},
 			wantStatus:     http.StatusTooManyRequests,
 			wantRemaining:  "0",
 			wantRetryAfter: "4", // 3s rounded up to the next second
@@ -117,10 +126,10 @@ func TestAuthorize(t *testing.T) {
 			name:         "limiter error",
 			originalPath: "/api/orders",
 			forwardedFor: "1.2.3.4",
-			rules: map[string]limiter.Limiter{
-				"/api/orders": fakeLimiter{err: errors.New("boom")},
-			},
-			wantStatus: http.StatusInternalServerError,
+			resolverRule: config.Rule{RequestsPerSec: 5, Burst: 10},
+			resolverOK:   true,
+			limiterErr:   errors.New("boom"),
+			wantStatus:   http.StatusInternalServerError,
 		},
 	}
 
@@ -134,8 +143,11 @@ func TestAuthorize(t *testing.T) {
 				r.Header.Set("X-Forwarded-For", tt.forwardedFor)
 			}
 
+			resolver := fakeResolver{rule: tt.resolverRule, ok: tt.resolverOK}
+			l := fakeLimiter{result: tt.limiterResult, err: tt.limiterErr}
+
 			w := httptest.NewRecorder()
-			Authorize(tt.rules).ServeHTTP(w, r)
+			Authorize(resolver, l).ServeHTTP(w, r)
 
 			if w.Code != tt.wantStatus {
 				t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)

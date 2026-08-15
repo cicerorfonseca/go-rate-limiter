@@ -7,10 +7,10 @@ import (
 )
 
 func TestTokenBucketLimiter_Allow(t *testing.T) {
-	l := NewTokenBucketLimiter(1, 5) // 1 token/sec, burst of 5
+	l := NewTokenBucketLimiter()
 	ctx := context.Background()
 
-	result, err := l.Allow(ctx, "client-a")
+	result, err := l.Allow(ctx, "client-a", 1, 5)
 	if err != nil {
 		t.Fatalf("Allow returned unexpected error: %v", err)
 	}
@@ -22,7 +22,7 @@ func TestTokenBucketLimiter_Allow(t *testing.T) {
 	// depend on exactly how many tokens a fresh bucket starts with.
 	l.buckets["client-a"].tokens = 0
 
-	result, err = l.Allow(ctx, "client-a")
+	result, err = l.Allow(ctx, "client-a", 1, 5)
 	if err != nil {
 		t.Fatalf("Allow returned unexpected error: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestTokenBucketLimiter_Allow(t *testing.T) {
 	// with no real sleeping in the test
 	l.buckets["client-a"].lastRefill = time.Now().Add(-3 * time.Second)
 
-	result, err = l.Allow(ctx, "client-a")
+	result, err = l.Allow(ctx, "client-a", 1, 5)
 	if err != nil {
 		t.Fatalf("Allow returned unexpected error: %v", err)
 	}
