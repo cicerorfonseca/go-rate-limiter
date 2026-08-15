@@ -5,23 +5,18 @@ import (
 	"strconv"
 	"strings"
 
+	"rate-limiter/internal/config"
 	"rate-limiter/internal/limiter"
 )
 
 // Authorize answers a gateway "should this request proceed?" check.
 // It expects the original request's path in X-Original-Path and the
 // original client's IP in X-Forwarded-For, both set by the gateway.
-func Authorize(rules map[string]limiter.Limiter) http.HandlerFunc {
+func Authorize(resolver config.Resolver, l limiter.Limiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := r.Header.Get("X-Original-Path")
 		if path == "" {
 			http.Error(w, "missing X-Original-Path header", http.StatusBadRequest)
-			return
-		}
-
-		l, ok := rules[path]
-		if !ok {
-			http.Error(w, "no rate limit rule for this path", http.StatusForbidden)
 			return
 		}
 
@@ -31,7 +26,22 @@ func Authorize(rules map[string]limiter.Limiter) http.HandlerFunc {
 			return
 		}
 
-		result, err := l.Allow(r.Context(), ip)
+		tenant := r.Header.Get("X-Tenant-Id")
+		rule, ok := resolver.Resolve(tenant, path)
+		if !ok {
+			http.Error(w, "no rate limit rule for this path", http.StatusForbidden)
+			return
+		}
+
+		// key concatenates tenant, ip, and path with ":".
+		// Note: IPv6 client addresses can contain colons, so two different
+		// (tenant, ip, path) could colide into the same key string.
+		// tenant "1", ip "2:3", path "/x"
+		// tenant "1:2", ip "3", path "/x"
+		// worth a collision-safe encoding if this becomes a real problem.
+		key := tenant + ":" + ip + ":" + path
+
+		result, err := l.Allow(r.Context(), key, rule.RequestsPerSec, rule.Burst)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return

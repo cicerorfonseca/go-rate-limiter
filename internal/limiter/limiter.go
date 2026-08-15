@@ -20,5 +20,5 @@ type Result struct {
 // Limiter decides whether a request identified by key is allowed to proceed right now.
 // key is caller-defined, scoped per endpoint by the caller.
 type Limiter interface {
-	Allow(ctx context.Context, key string) (Result, error)
+	Allow(ctx context.Context, key string, rate, burst float64) (Result, error)
 }
