@@ -45,3 +45,22 @@ func TestTokenBucketLimiter_Allow(t *testing.T) {
 		t.Fatalf("expected request to be allowed after refill")
 	}
 }
+
+func TestCleanUp(t *testing.T) {
+	l := NewTokenBucketLimiter()
+	ctx := context.Background()
+
+	l.Allow(ctx, "stale", 1, 5)
+	l.Allow(ctx, "fresh", 1, 5)
+
+	l.buckets["stale"].lastRefill = time.Now().Add(-1 * time.Hour)
+
+	l.Cleanup(time.Now().Add(-10 * time.Minute))
+
+	if _, exists := l.buckets["stale"]; exists {
+		t.Errorf("expected stale bucket to be removed")
+	}
+	if _, exists := l.buckets["fresh"]; !exists {
+		t.Errorf("expected fresh bucket to remain")
+	}
+}

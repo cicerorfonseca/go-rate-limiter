@@ -53,3 +53,17 @@ func (l *TokenBucketLimiter) Allow(ctx context.Context, key string, rate, burst 
 	wait := time.Duration(deficit / rate * float64(time.Second))
 	return Result{Allowed: false, Remaining: int(b.tokens), RetryAfter: wait}, nil
 }
+
+// Cleanup deletes buckets that haven't been touched since before. Call it periodically
+// (see the janitor in cmd/server) so memory doesn't grow without bound as new
+// tenant/client/endpoint combination show up over the life of the process
+func (l *TokenBucketLimiter) Cleanup(before time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	for key, b := range l.buckets {
+		if b.lastRefill.Before(before) {
+			delete(l.buckets, key)
+		}
+	}
+}
