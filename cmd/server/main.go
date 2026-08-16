@@ -16,7 +16,7 @@ func main() {
 	go janitor(l)
 
 	mux := http.NewServeMux()
-	mux.Handle("/authorize", httpserver.Authorize(cfg, l))
+	mux.Handle("POST /authorize", httpserver.Authorize(cfg, l))
 	mux.HandleFunc("/healthz", healthHandler)
 
 	const addr = ":8080"
